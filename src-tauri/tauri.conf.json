@@ -15,20 +15,15 @@
         "title": "Lume Control",
         "label": "main",
         "url": "/",
-        "width": 400,
-        "height": 340,
-        "resizable": false
-      },
-      {
-        "title": "",
-        "label": "overlay",
-        "url": "/overlay",
+        "width": 328,
+        "height": 252,
+        "resizable": false,
         "decorations": false,
-        "shadow": false,
         "transparent": true,
+        "shadow": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
-        "fullscreen": true
+        "visible": false
       }
     ],
     "security": {

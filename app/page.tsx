@@ -13,14 +13,15 @@ import { emit } from "@tauri-apps/api/event";
 import {
   DEFAULT_OPACITY,
   MAX_OPACITY,
+  SET_DIMMER_ENABLED_EVENT,
   UPDATE_OPACITY_EVENT,
+  type DimmerEnabledPayload,
   type OpacityPayload,
 } from "@/lib/events";
-import { getOverlayWindow } from "@/lib/windows";
 
 export default function ControlPanelPage() {
   const [opacity, setOpacity] = useState(DEFAULT_OPACITY);
-  const [overlayOn, setOverlayOn] = useState(true);
+  const [dimmerOn, setDimmerOn] = useState(true);
 
   const dimPercent = Math.round((opacity / MAX_OPACITY) * 100);
 
@@ -37,20 +38,15 @@ export default function ControlPanelPage() {
     await emit(UPDATE_OPACITY_EVENT, payload);
   };
 
-  const handleOverlayToggle = async () => {
-    const overlay = await getOverlayWindow();
-    if (overlayOn) {
-      await overlay.hide();
-      setOverlayOn(false);
-      return;
-    }
-
-    await overlay.show();
-    setOverlayOn(true);
+  const handleDimmerToggle = async () => {
+    const next = !dimmerOn;
+    const payload: DimmerEnabledPayload = { enabled: next };
+    await emit(SET_DIMMER_ENABLED_EVENT, payload);
+    setDimmerOn(next);
   };
 
   return (
-    <main className="flex h-screen flex-col justify-center bg-ink px-6 text-beige">
+    <main className="absolute inset-3 flex flex-col justify-center rounded-2xl border border-beige/12 bg-ink px-6 text-beige">
       <p className="mb-1 text-center text-[11px] font-medium tracking-[0.35em] text-beige-muted">
         LUME
       </p>
@@ -72,23 +68,23 @@ export default function ControlPanelPage() {
         <span>Max</span>
       </div>
       <label className="mt-6 flex cursor-pointer items-center justify-between border-t border-beige/12 pt-4">
-        <span className="text-sm text-beige-muted">Overlay</span>
+        <span className="text-sm text-beige-muted">Dimmer</span>
         <input
           type="checkbox"
-          checked={overlayOn}
-          onChange={handleOverlayToggle}
+          checked={dimmerOn}
+          onChange={handleDimmerToggle}
           className="sr-only"
-          aria-label="Toggle overlay"
+          aria-label="Toggle dimmer"
         />
         <span
           aria-hidden="true"
           className={`relative h-6 w-11 rounded-full ${
-            overlayOn ? "bg-beige" : "bg-ink-raised"
+            dimmerOn ? "bg-beige" : "bg-ink-raised"
           }`}
         >
           <span
             className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-ink ${
-              overlayOn ? "translate-x-5" : "translate-x-0"
+              dimmerOn ? "translate-x-5" : "translate-x-0"
             }`}
           />
         </span>
