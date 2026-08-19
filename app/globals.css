@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #0c0b0a;
+  --color-ink-raised: #161412;
+  --color-beige: #e6d5b8;
+  --color-beige-muted: #b8a88a;
+}
+
+.opacity-slider {
+  appearance: none;
+  height: 4px;
+  border-radius: 9999px;
+  background: var(--color-ink-raised);
+}
+
+.opacity-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: var(--color-beige);
+  cursor: pointer;
+}
+
+.opacity-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 9999px;
+  background: var(--color-beige);
+  cursor: pointer;
+}
