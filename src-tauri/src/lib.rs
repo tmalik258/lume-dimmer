@@ -7,7 +7,7 @@ use tauri::{
 };
 
 mod gamma;
-mod gamma_win;
+mod gamma_mag;
 
 const MAIN_WINDOW_LABEL: &str = "main";
 const MENU_TOGGLE_ID: &str = "toggle";
@@ -97,6 +97,7 @@ pub fn run() {
         })
         .setup(|app| {
             gamma::install_panic_hook();
+            gamma::initialize();
 
             let toggle_item = MenuItem::with_id(
                 app,

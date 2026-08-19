@@ -3,23 +3,23 @@ use std::sync::Mutex;
 use serde::Deserialize;
 use tauri::AppHandle;
 
-use crate::gamma_win::{self, DeviceRamp};
+use crate::gamma_mag;
 
 pub const UPDATE_OPACITY_EVENT: &str = "update-opacity";
 pub const SET_DIMMER_ENABLED_EVENT: &str = "set-dimmer-enabled";
 pub const DEFAULT_OPACITY: f32 = 0.5;
 pub const MAX_OPACITY: f32 = 0.9;
 
-struct GammaState {
+struct DimmerState {
     enabled: bool,
     opacity: f32,
-    baselines: Vec<DeviceRamp>,
+    initialized: bool,
 }
 
-static STATE: Mutex<GammaState> = Mutex::new(GammaState {
+static STATE: Mutex<DimmerState> = Mutex::new(DimmerState {
     enabled: false,
     opacity: DEFAULT_OPACITY,
-    baselines: Vec::new(),
+    initialized: false,
 });
 
 #[derive(Deserialize)]
@@ -32,10 +32,8 @@ struct DimmerEnabledPayload {
     enabled: bool,
 }
 
-fn lock_state() -> std::sync::MutexGuard<'static, GammaState> {
-    STATE
-        .lock()
-        .expect("Gamma state mutex was poisoned")
+fn lock_state() -> std::sync::MutexGuard<'static, DimmerState> {
+    STATE.lock().expect("Dimmer state mutex was poisoned")
 }
 
 fn brightness_scale(opacity: f32) -> f32 {
@@ -45,90 +43,76 @@ fn brightness_scale(opacity: f32) -> f32 {
     1.0 - opacity
 }
 
-pub fn set_enabled(enabled: bool) {
-    let mut state = lock_state();
-    if enabled {
-        if !state.enabled {
-            state.baselines = gamma_win::capture_baselines();
-            state.enabled = true;
-        }
-        let scale = brightness_scale(state.opacity);
-        let baselines = state.baselines.clone();
-        drop(state);
-        gamma_win::apply_scaled(&baselines, scale);
+fn apply(state: &DimmerState) {
+    if !state.initialized {
+        panic!("Expected the magnifier dimmer to be initialized before applying brightness");
+    }
+    if state.enabled {
+        gamma_mag::set_brightness(brightness_scale(state.opacity));
         return;
     }
+    gamma_mag::set_brightness(1.0);
+}
 
-    let baselines = std::mem::take(&mut state.baselines);
-    state.enabled = false;
-    drop(state);
-    gamma_win::restore(&baselines);
+pub fn initialize() {
+    let mut state = lock_state();
+    if state.initialized {
+        return;
+    }
+    gamma_mag::initialize();
+    state.initialized = true;
+}
+
+pub fn set_enabled(enabled: bool) {
+    let mut state = lock_state();
+    state.enabled = enabled;
+    apply(&state);
 }
 
 pub fn restore() {
-    set_enabled(false);
+    let mut state = lock_state();
+    if !state.initialized {
+        return;
+    }
+    state.enabled = false;
+    drop(state);
+    gamma_mag::shutdown();
+    lock_state().initialized = false;
 }
 
 pub fn set_opacity(opacity: f32) {
-    let scale = brightness_scale(opacity);
     let mut state = lock_state();
     state.opacity = opacity;
     if !state.enabled {
         return;
     }
-    let baselines = state.baselines.clone();
-    drop(state);
-    gamma_win::apply_scaled(&baselines, scale);
+    apply(&state);
 }
 
-fn parse_opacity_payload(payload: &str) -> f32 {
+pub fn on_opacity_event(app: &AppHandle, payload: &str) {
     let parsed: OpacityPayload = serde_json::from_str(payload).unwrap_or_else(|err| {
         panic!("Expected update-opacity payload to be {{ opacity: number }}, got {payload}: {err}");
     });
-    parsed.opacity
+    let app = app.clone();
+    app.run_on_main_thread(move || set_opacity(parsed.opacity))
+        .expect("Failed to apply dimmer opacity on the main thread");
 }
 
-fn parse_enabled_payload(payload: &str) -> bool {
+pub fn on_enabled_event(app: &AppHandle, payload: &str) {
     let parsed: DimmerEnabledPayload = serde_json::from_str(payload).unwrap_or_else(|err| {
         panic!(
             "Expected set-dimmer-enabled payload to be {{ enabled: bool }}, got {payload}: {err}"
         );
     });
-    parsed.enabled
-}
-
-pub fn on_opacity_event(app: &AppHandle, payload: &str) {
-    let opacity = parse_opacity_payload(payload);
     let app = app.clone();
-    app.run_on_main_thread(move || set_opacity(opacity))
-        .expect("Failed to apply opacity on the main thread");
-}
-
-pub fn on_enabled_event(app: &AppHandle, payload: &str) {
-    let enabled = parse_enabled_payload(payload);
-    let app = app.clone();
-    app.run_on_main_thread(move || set_enabled(enabled))
+    app.run_on_main_thread(move || set_enabled(parsed.enabled))
         .expect("Failed to apply dimmer enable on the main thread");
 }
 
 pub fn install_panic_hook() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        restore_best_effort();
+        gamma_mag::restore_best_effort();
         previous(info);
     }));
-}
-
-fn restore_best_effort() {
-    let mut state = match STATE.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    if state.baselines.is_empty() {
-        return;
-    }
-    let baselines = std::mem::take(&mut state.baselines);
-    state.enabled = false;
-    drop(state);
-    gamma_win::restore_best_effort(&baselines);
 }
