@@ -93,7 +93,6 @@ pub fn on_opacity_event(app: &AppHandle, payload: &str) {
     let parsed: OpacityPayload = serde_json::from_str(payload).unwrap_or_else(|err| {
         panic!("Expected update-opacity payload to be {{ opacity: number }}, got {payload}: {err}");
     });
-    let app = app.clone();
     app.run_on_main_thread(move || set_opacity(parsed.opacity))
         .expect("Failed to apply dimmer opacity on the main thread");
 }
@@ -104,7 +103,6 @@ pub fn on_enabled_event(app: &AppHandle, payload: &str) {
             "Expected set-dimmer-enabled payload to be {{ enabled: bool }}, got {payload}: {err}"
         );
     });
-    let app = app.clone();
     app.run_on_main_thread(move || set_enabled(parsed.enabled))
         .expect("Failed to apply dimmer enable on the main thread");
 }

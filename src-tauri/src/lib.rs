@@ -2,89 +2,48 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::{
     menu::{Menu, MenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Listener, Manager, PhysicalPosition, RunEvent, WindowEvent,
+    tray::TrayIconBuilder,
+    Listener, Manager, RunEvent, WindowEvent,
 };
 
+mod flyout;
+mod flyout_win;
 mod gamma;
 mod gamma_mag;
 
-const MAIN_WINDOW_LABEL: &str = "main";
+use flyout::{FlyoutState, MAIN_WINDOW_LABEL};
+
 const MENU_TOGGLE_ID: &str = "toggle";
 const MENU_QUIT_ID: &str = "quit";
-const FLYOUT_GAP_PX: i32 = 12;
-
-struct FlyoutState {
-    ignore_next_blur: AtomicBool,
-}
-
-fn main_window(app: &AppHandle) -> tauri::WebviewWindow {
-    app.get_webview_window(MAIN_WINDOW_LABEL)
-        .expect("Expected webview window with label main")
-}
-
-fn flyout_state(app: &AppHandle) -> &FlyoutState {
-    app.state::<FlyoutState>().inner()
-}
-
-fn position_control_flyout_bottom_right(window: &tauri::WebviewWindow) {
-    let size = window
-        .outer_size()
-        .expect("Failed to read control flyout size");
-    let width = i32::try_from(size.width).expect("Flyout width does not fit in i32");
-    let height = i32::try_from(size.height).expect("Flyout height does not fit in i32");
-
-    let monitor = window
-        .current_monitor()
-        .expect("Failed to read current monitor")
-        .expect("Expected a current monitor");
-    let work = monitor.work_area();
-    let work_width = i32::try_from(work.size.width).expect("Work area width does not fit in i32");
-    let work_height = i32::try_from(work.size.height).expect("Work area height does not fit in i32");
-
-    let x = work.position.x + work_width - width - FLYOUT_GAP_PX;
-    let y = work.position.y + work_height - height - FLYOUT_GAP_PX;
-
-    window
-        .set_position(PhysicalPosition::new(x, y))
-        .expect("Failed to position control flyout");
-}
-
-fn show_control_flyout(app: &AppHandle) {
-    let window = main_window(app);
-    position_control_flyout_bottom_right(&window);
-    flyout_state(app)
-        .ignore_next_blur
-        .store(true, Ordering::SeqCst);
-    window.show().expect("Failed to show control flyout");
-    window.set_focus().expect("Failed to focus control flyout");
-}
-
-fn hide_control_flyout(app: &AppHandle) {
-    flyout_state(app)
-        .ignore_next_blur
-        .store(false, Ordering::SeqCst);
-    main_window(app)
-        .hide()
-        .expect("Failed to hide control flyout");
-}
-
-fn toggle_control_flyout(app: &AppHandle) {
-    let is_visible = main_window(app)
-        .is_visible()
-        .expect("Failed to read control flyout visibility");
-
-    if is_visible {
-        hide_control_flyout(app);
-        return;
-    }
-
-    show_control_flyout(app);
-}
 
 fn restore_gamma_on_exit(event: &RunEvent) {
     if matches!(event, RunEvent::Exit | RunEvent::ExitRequested { .. }) {
         gamma::restore();
+    }
+}
+
+fn on_main_window_event(window: &tauri::Window, event: &WindowEvent) {
+    if window.label() != MAIN_WINDOW_LABEL {
+        return;
+    }
+
+    match event {
+        WindowEvent::CloseRequested { api, .. } => {
+            flyout::hide_control_flyout(window.app_handle());
+            api.prevent_close();
+        }
+        WindowEvent::Focused(false) => {
+            let ignore_blur = window
+                .app_handle()
+                .state::<FlyoutState>()
+                .ignore_next_blur
+                .swap(false, Ordering::SeqCst);
+            if ignore_blur {
+                return;
+            }
+            flyout::hide_control_flyout(window.app_handle());
+        }
+        _ => {}
     }
 }
 
@@ -96,6 +55,7 @@ pub fn run() {
             ignore_next_blur: AtomicBool::new(false),
         })
         .setup(|app| {
+            flyout::bind_app(app.handle().clone());
             gamma::install_panic_hook();
             gamma::initialize();
 
@@ -121,7 +81,7 @@ pub fn run() {
                 .tooltip("Lume")
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
-                    MENU_TOGGLE_ID => toggle_control_flyout(app),
+                    MENU_TOGGLE_ID => flyout::toggle_control_flyout(app),
                     MENU_QUIT_ID => {
                         gamma::restore();
                         app.exit(0);
@@ -129,14 +89,7 @@ pub fn run() {
                     other => panic!("Unhandled tray menu id {other}"),
                 })
                 .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        toggle_control_flyout(tray.app_handle());
-                    }
+                    flyout::on_tray_icon_event(tray.app_handle(), event);
                 })
                 .build(app)?;
 
@@ -153,28 +106,7 @@ pub fn run() {
 
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if window.label() != MAIN_WINDOW_LABEL {
-                return;
-            }
-
-            match event {
-                WindowEvent::CloseRequested { api, .. } => {
-                    hide_control_flyout(window.app_handle());
-                    api.prevent_close();
-                }
-                WindowEvent::Focused(false) => {
-                    let ignore_blur = flyout_state(window.app_handle())
-                        .ignore_next_blur
-                        .swap(false, Ordering::SeqCst);
-                    if ignore_blur {
-                        return;
-                    }
-                    hide_control_flyout(window.app_handle());
-                }
-                _ => {}
-            }
-        })
+        .on_window_event(|window, event| on_main_window_event(window, event))
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app, event| restore_gamma_on_exit(&event));
